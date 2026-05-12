@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+.pycache/
+*.pyc
+node_modules/
+.next/
+dist/
+build/
+.DS_Store
+postgres-data/
+chroma-data/
+

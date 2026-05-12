@@ -1,0 +1,15 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic-settings==2.7.1
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+langchain==0.3.14
+langchain-openai==0.2.14
+langgraph==0.2.62
+chromadb==0.5.23
+httpx==0.28.1
+numpy==2.2.1
+pytest==8.3.4
+pytest-asyncio==0.25.0
+
