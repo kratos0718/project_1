@@ -37,17 +37,41 @@ export type Analytics = {
   trend_points: Array<Record<string, unknown>>;
 };
 
+import { auth } from "@clerk/nextjs/server";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export async function fetchComplaints(): Promise<Complaint[]> {
-  const response = await fetch(`${API_BASE}/api/complaints`, { cache: "no-store" });
+  let token: string | null = null;
+  try {
+    const session = await auth();
+    token = await session.getToken();
+  } catch (e) {
+    // Ignore error if auth is not available
+  }
+
+  const response = await fetch(`${API_BASE}/api/complaints`, { 
+    cache: "no-store",
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined
+  });
   if (!response.ok) return [];
   const data = (await response.json()) as { complaints: Complaint[] };
   return data.complaints;
 }
 
 export async function fetchAnalytics(): Promise<Analytics> {
-  const response = await fetch(`${API_BASE}/api/analytics`, { cache: "no-store" });
+  let token: string | null = null;
+  try {
+    const session = await auth();
+    token = await session.getToken();
+  } catch (e) {
+    // Ignore error if auth is not available
+  }
+
+  const response = await fetch(`${API_BASE}/api/analytics`, { 
+    cache: "no-store",
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined
+  });
   if (!response.ok) {
     return { total_complaints: 0, open_complaints: 0, severity_distribution: {}, locality_counts: {}, trend_points: [] };
   }

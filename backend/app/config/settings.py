@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     chunk_size: int = 900
     chunk_overlap: int = 120
     backend_cors_origins: str = Field(default="http://localhost:3000")
+    clerk_issuer_url: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

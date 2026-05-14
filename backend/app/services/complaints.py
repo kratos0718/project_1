@@ -1,7 +1,10 @@
 from time import perf_counter
+import logging
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import BackgroundTasks
+from app.config.database import SessionLocal
 
 from app.agents.workflow import ComplaintAgentWorkflow
 from app.config.settings import Settings
@@ -15,6 +18,63 @@ from app.rag.retriever import ComplaintRetriever
 from app.rag.vector_store import ChromaVectorStore
 from app.utils.text import clean_complaint_text
 
+logger = logging.getLogger(__name__)
+
+async def process_complaint_background(complaint_id: str, payload_locality: str, payload_category: str, started: float, settings: Settings) -> None:
+    async with SessionLocal() as session:
+        service = ComplaintService(session, settings)
+        complaint = await session.get(ComplaintRecord, complaint_id)
+        if not complaint:
+            logger.error(f"Complaint {complaint_id} not found for background processing")
+            return
+            
+        cleaned = complaint.cleaned_text
+        
+        try:
+            citations = await service.retriever.retrieve(cleaned, locality=payload_locality, category=payload_category)
+            report = await service.workflow.run(
+                {
+                    "complaint_id": complaint.id,
+                    "text": cleaned,
+                    "locality": payload_locality,
+                    "category": payload_category,
+                    "citations": citations,
+                }
+            )
+
+            complaint.severity_score = report.severity_score
+            complaint.escalation_priority = report.escalation_priority
+            session.add(
+                AgentReportRecord(
+                    complaint_id=complaint.id,
+                    summary=report.summary,
+                    urgency=report.urgency,
+                    duplicate_ids=report.duplicate_ids,
+                    citations=[citation.model_dump() for citation in report.citations],
+                    reasoning_trace=report.reasoning_trace,
+                )
+            )
+
+            chunks = service.chunker.split(cleaned)
+            vectors = await service.embeddings.embed_documents([chunk.text for chunk in chunks])
+            await service.vector_store.upsert(
+                complaint_id=complaint.id,
+                chunks=[chunk.text for chunk in chunks],
+                embeddings=vectors,
+                metadata={"locality": payload_locality, "category": payload_category, "created_at": complaint.created_at.isoformat()},
+            )
+            await service.memory.remember("issue", report.summary, locality=payload_locality, source_complaint_id=complaint.id, importance=max(1, int(report.severity_score * 5)))
+            await service.evaluator.log_submission(
+                complaint_id=complaint.id,
+                citations=citations,
+                report_summary=report.summary,
+                latency_ms=int((perf_counter() - started) * 1000),
+            )
+            await session.commit()
+        except Exception as e:
+            logger.exception(f"Error processing complaint {complaint_id} in background")
+            await session.rollback()
+
 
 class ComplaintService:
     def __init__(self, session: AsyncSession, settings: Settings) -> None:
@@ -24,7 +84,7 @@ class ComplaintService:
         self._embeddings: EmbeddingService | None = None
         self._vector_store: ChromaVectorStore | None = None
         self._retriever: ComplaintRetriever | None = None
-        self.workflow = ComplaintAgentWorkflow()
+        self.workflow = ComplaintAgentWorkflow(settings)
         self.memory = MemoryStore(session)
         self.evaluator = EvaluationService(session)
 
@@ -46,7 +106,7 @@ class ComplaintService:
             self._retriever = ComplaintRetriever(self.embeddings, self.vector_store)
         return self._retriever
 
-    async def submit(self, payload: ComplaintCreate) -> ComplaintResponse:
+    async def submit(self, payload: ComplaintCreate, background_tasks: BackgroundTasks) -> ComplaintResponse:
         started = perf_counter()
         cleaned = clean_complaint_text(payload.text)
         complaint = ComplaintRecord(
@@ -57,48 +117,18 @@ class ComplaintService:
             extra_metadata=payload.metadata,
         )
         self.session.add(complaint)
-        await self.session.flush()
-
-        citations = await self.retriever.retrieve(cleaned, locality=payload.locality, category=payload.category)
-        report = await self.workflow.run(
-            {
-                "complaint_id": complaint.id,
-                "text": cleaned,
-                "locality": payload.locality,
-                "category": payload.category,
-                "citations": citations,
-            }
-        )
-
-        complaint.severity_score = report.severity_score
-        complaint.escalation_priority = report.escalation_priority
-        self.session.add(
-            AgentReportRecord(
-                complaint_id=complaint.id,
-                summary=report.summary,
-                urgency=report.urgency,
-                duplicate_ids=report.duplicate_ids,
-                citations=[citation.model_dump() for citation in report.citations],
-                reasoning_trace=report.reasoning_trace,
-            )
-        )
-
-        chunks = self.chunker.split(cleaned)
-        vectors = await self.embeddings.embed_documents([chunk.text for chunk in chunks])
-        await self.vector_store.upsert(
-            complaint_id=complaint.id,
-            chunks=[chunk.text for chunk in chunks],
-            embeddings=vectors,
-            metadata={"locality": payload.locality, "category": payload.category, "created_at": complaint.created_at.isoformat()},
-        )
-        await self.memory.remember("issue", report.summary, locality=payload.locality, source_complaint_id=complaint.id, importance=max(1, int(report.severity_score * 5)))
-        await self.evaluator.log_submission(
-            complaint_id=complaint.id,
-            citations=citations,
-            report_summary=report.summary,
-            latency_ms=int((perf_counter() - started) * 1000),
-        )
         await self.session.commit()
+        await self.session.refresh(complaint)
+
+        background_tasks.add_task(
+            process_complaint_background,
+            complaint_id=complaint.id,
+            payload_locality=payload.locality,
+            payload_category=payload.category,
+            started=started,
+            settings=self.settings,
+        )
+
         return ComplaintResponse(
             id=complaint.id,
             raw_text=complaint.raw_text,
@@ -106,10 +136,10 @@ class ComplaintService:
             locality=complaint.locality,
             category=complaint.category,
             status=complaint.status,
-            severity_score=complaint.severity_score,
-            escalation_priority=complaint.escalation_priority,
+            severity_score=None,
+            escalation_priority=None,
             created_at=complaint.created_at,
-            report=report,
+            report=None,
         )
 
     async def list_recent(self, limit: int = 25) -> list[ComplaintResponse]:

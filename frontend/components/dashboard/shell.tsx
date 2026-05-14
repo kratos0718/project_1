@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { UserButton } from "@clerk/nextjs";
 import { Activity, ClipboardList, Gauge, Network } from "lucide-react";
 
 const navItems = [
@@ -18,7 +19,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="font-semibold">Governance Ops</div>
           </div>
         </div>
-        <nav className="space-y-1 px-3">
+        <nav className="flex-1 space-y-1 px-3 mt-4">
           {navItems.map((item) => (
             <Link key={item.href} href={item.href} className="flex h-11 items-center gap-3 rounded-md px-3 text-sm text-white/80 hover:bg-white/10 hover:text-white">
               <item.icon className="h-4 w-4" />
@@ -26,6 +27,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           ))}
         </nav>
+        <div className="absolute bottom-0 w-full p-4 border-t border-white/10">
+          <div className="flex items-center justify-between px-3">
+            <span className="text-sm text-white/80">Account</span>
+            <UserButton afterSignOutUrl="/dashboard" />
+          </div>
+        </div>
       </aside>
       <main className="lg:pl-72">
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">{children}</div>
