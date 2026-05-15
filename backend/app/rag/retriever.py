@@ -1,3 +1,4 @@
+from typing import Any
 from app.models.schemas import Citation
 from app.rag.embeddings import EmbeddingService
 from app.rag.vector_store import ChromaVectorStore
@@ -31,7 +32,11 @@ class ComplaintRetriever:
             for result in reranked
         ]
 
-    def _metadata_filter(self, locality: str | None, category: str | None) -> dict[str, str] | None:
-        filters = {key: value for key, value in {"locality": locality, "category": category}.items() if value}
-        return filters or None
+    def _metadata_filter(self, locality: str | None, category: str | None) -> dict[str, Any] | None:
+        filters = [{key: value} for key, value in {"locality": locality, "category": category}.items() if value]
+        if not filters:
+            return None
+        if len(filters) == 1:
+            return filters[0]
+        return {"$and": filters}
 

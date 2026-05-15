@@ -16,7 +16,7 @@ class RetrievalResult:
 
 class ChromaVectorStore:
     def __init__(self, settings: Settings) -> None:
-        self.client = chromadb.HttpClient(host=settings.chroma_host, port=settings.chroma_port)
+        self.client = chromadb.PersistentClient(path="./chroma_data")
         self.collection = self.client.get_or_create_collection("civic_complaints")
 
     async def upsert(
