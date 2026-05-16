@@ -1,24 +1,34 @@
 # Deployment Guide
 
-## Frontend: Vercel
+## Production Architecture
 
-1. Set project root to `frontend`.
-2. Add `NEXT_PUBLIC_API_BASE_URL`.
-3. Add Clerk publishable key when auth is enabled.
-4. Deploy with the default Next.js build command.
+This platform consists of three main components:
+1. **Frontend:** Next.js application, served as a multi-stage standalone Node.js image or deployed to Vercel.
+2. **Backend:** FastAPI application, managed by Gunicorn with Uvicorn async workers.
+3. **Database Layer:** PostgreSQL for persistent storage and ChromaDB (or Pinecone) for vector embeddings.
 
-## Backend: Railway or Render
+## Deploying to Production (Docker-based)
 
-1. Set project root to `backend`.
-2. Build from `backend/Dockerfile`.
-3. Add `DATABASE_URL`, `OPENAI_API_KEY`, `CHROMA_HOST`, and `CHROMA_PORT`.
-4. Provision PostgreSQL.
-5. Provision ChromaDB or replace `ChromaVectorStore` with Pinecone for managed vector search.
+The `docker-compose.yml` supports end-to-end production testing, but for actual deployment, use container orchestrators (e.g. AWS ECS, Kubernetes).
 
-## Production Notes
+1. Set up your environments with `.env`:
+   - `DATABASE_URL` (PostgreSQL connection string)
+   - `OPENAI_API_KEY` (Your API key for embeddings/LLMs)
+   - `CHROMA_HOST` and `CHROMA_PORT`
+   - `NEXT_PUBLIC_API_BASE_URL` (For frontend API calls)
+2. Build the optimized images:
+   - Backend: Uses Gunicorn with 4 workers. Ensure memory allocation is sufficient.
+   - Frontend: Uses a multi-stage build emitting a Next.js `standalone` process for extremely small container footprints.
+3. Apply database migrations:
+   - Before starting the backend, run Alembic: `alembic upgrade head`
 
-- Move long-running complaint analysis into a queue worker.
-- Use Alembic migrations instead of startup `create_all`.
-- Add auth middleware and tenant-aware metadata filtering.
-- Enable structured logs and trace IDs across API, vector search, and agent workflow.
+## Observability & Logging
 
+- **Structured JSON Logging:** The backend outputs standard JSON logs using `python-json-logger`.
+- **Correlation IDs:** Every request receives an `X-Request-ID` attached to the log records, allowing easy tracking across the API and the LangGraph agent workflows. Configure your log aggregator (e.g. Datadog, ELK) to index `correlation_id`.
+
+## Managed Services Alternatives
+
+- **Frontend:** Vercel (Add `NEXT_PUBLIC_API_BASE_URL` and Clerk keys).
+- **Backend:** Railway or Render (Connect PostgreSQL plugin).
+- **Vector DB:** Pinecone (Replaces ChromaDB local container).
